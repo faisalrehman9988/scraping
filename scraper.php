@@ -3,7 +3,7 @@ require_once 'db.php';
 
 set_time_limit(180);
 
-// Stop signal used by the frontend.
+
 $stopFile = sys_get_temp_dir() . '/scraper_stop_' . session_id();
 
 if (isset($_GET['action']) && $_GET['action'] === 'stop') {
@@ -13,7 +13,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'stop') {
     exit;
 }
 
-// Progress endpoint used by the frontend.
+
 if (isset($_GET['action']) && $_GET['action'] === 'progress') {
     session_start();
     $progressFile = sys_get_temp_dir() . '/scraper_progress_' . session_id();
@@ -45,9 +45,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
 
     $camLinks = [];
 
-    // -------------------------------------------------------------------------
-    // Collect cam listing links (no individual cam page visits yet)
-    // -------------------------------------------------------------------------
     if (count($segments) === 1 && reset($segments) !== 'category') {
         $camLinks[$targetUrl] = ['title' => titleFromSlug($targetUrl), 'country' => '', 'stream_url' => ''];
 
@@ -103,9 +100,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
 
     writeProgress($progressFile, ['found' => count($camLinks), 'saved' => 0, 'status' => 'Fetching stream URLs...']);
 
-    // -------------------------------------------------------------------------
-    // NOW fetch individual cam pages for stream URLs — in parallel, with limit
-    // -------------------------------------------------------------------------
     if (!shouldStop($stopFile)) {
         $urlsToFetch = array_keys($camLinks);
         $BATCH       = 10;
@@ -131,9 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Save to DB
-    // -------------------------------------------------------------------------
+ 
     writeProgress($progressFile, ['found' => count($camLinks), 'saved' => 0, 'status' => 'Saving to database...']);
 
     $pdo = getDBconnection();
