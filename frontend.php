@@ -66,6 +66,7 @@ try {
     $streams = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {
     $dbError = $e->getMessage();
+    
 }
 
 $successMsg = $_GET['success'] ?? null;
@@ -89,10 +90,17 @@ $errorMsg = $_GET['error'] ?? null;
                 <?php endif; ?>
             </h1>
         </header>
-
-        <?php if ($successMsg): ?>
-            <div class="alert alert-success"><?php echo htmlspecialchars($successMsg, ENT_QUOTES, 'UTF-8'); ?></div>
-        <?php endif; ?>
+<?php if ($successMsg): ?>
+    <div id="successAlert" class="alert alert-success">
+        <?php echo htmlspecialchars($successMsg, ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+    <script>
+        setTimeout(() => {
+            const el = document.getElementById('successAlert');
+            if (el) el.style.display = 'none';
+        }, 10000);
+    </script>
+<?php endif; ?>
 
         <?php if ($errorMsg || $dbError): ?>
             <div class="alert alert-error"><?php echo htmlspecialchars($errorMsg ?: $dbError, ENT_QUOTES, 'UTF-8'); ?></div>

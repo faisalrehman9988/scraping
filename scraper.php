@@ -4,6 +4,7 @@ require_once 'db.php';
 set_time_limit(180);
 
 
+
 $stopFile = sys_get_temp_dir() . '/scraper_stop_' . session_id();
 
 if (isset($_GET['action']) && $_GET['action'] === 'stop') {
@@ -31,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
     writeProgress($progressFile, ['found' => 0, 'saved' => 0, 'status' => 'Starting...']);
 
     $targetUrl  = filter_var($_POST['url'], FILTER_SANITIZE_URL);
-    $limit      = max(10, min(200, (int)($_POST['limit'] ?? 50))); // clamp 10–200
+    $limit      = max(10, min(200, (int)($_POST['limit'] ?? 50)));
     $targetHost = parse_url($targetUrl, PHP_URL_HOST);
     $bareHost   = preg_replace('/^www\./', '', $targetHost);
 
@@ -125,7 +126,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
         }
     }
 
- 
     writeProgress($progressFile, ['found' => count($camLinks), 'saved' => 0, 'status' => 'Saving to database...']);
 
     $pdo = getDBconnection();
@@ -217,6 +217,7 @@ function fetchParallel(array $urls, int $batchSize = 15): array
         }
         $running = null;
         $start   = time();
+
         do {
             curl_multi_exec($mh, $running);
             if ($running) curl_multi_select($mh, 0.5);
@@ -241,10 +242,13 @@ function fetchOnePage(string $url, int $timeout = 15): string|false
 {
     $ch = curl_init();
     curl_setopt_array($ch, [
-        CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 5,
-        CURLOPT_TIMEOUT => $timeout, CURLOPT_ENCODING => '',
-        CURLOPT_HTTPHEADER => ['User-Agent: Mozilla/5.0','Accept: text/html,*/*;q=0.8'],
+        CURLOPT_URL            => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS      => 5,
+        CURLOPT_TIMEOUT        => $timeout,
+        CURLOPT_ENCODING       => '',
+        CURLOPT_HTTPHEADER     => ['User-Agent: Mozilla/5.0', 'Accept: text/html,*/*;q=0.8'],
     ]);
     $html = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -297,8 +301,8 @@ function extractCamCards(string $html, string $bareHost, array &$camLinks): void
 {
     $dom = new DOMDocument(); @$dom->loadHTML($html);
     $xpath = new DOMXPath($dom);
-    $skipContains   = ['category','tag','page','author','feed','wp-','articles','about','contact','faq','privacy','terms','sitemap','search','embed','warmest','coldest'];
-    $skipCountry    = ['themes','airports','beaches','mountains','lakes-and-rivers','ports','wildlife','railways','ski-slopes','surfing','birds','indoor','volcanoes','underwater','universities','zoo','markets','space','americas','europe','asia','africa','caribbean','oceania','time-travel','amusement-park','aurora-borealis','landscapes','world-heritage-sites','united-states'];
+    $skipContains = ['category','tag','page','author','feed','wp-','articles','about','contact','faq','privacy','terms','sitemap','search','embed','warmest','coldest'];
+    $skipCountry  = ['themes','airports','beaches','mountains','lakes-and-rivers','ports','wildlife','railways','ski-slopes','surfing','birds','indoor','volcanoes','underwater','universities','zoo','markets','space','americas','europe','asia','africa','caribbean','oceania','time-travel','amusement-park','aurora-borealis','landscapes','world-heritage-sites','united-states'];
     $cards = $xpath->query('//article');
     if ($cards->length === 0) $cards = $xpath->query('//div[contains(@class,"post") or contains(@class,"cam") or contains(@class,"card")]');
     foreach ($cards as $card) {
@@ -365,7 +369,8 @@ function extractStreamUrl(string $html): string
             $iHost = parse_url($src, PHP_URL_HOST);
             if (str_contains($iHost, 'youtube') || str_contains($iHost, 'youtu.be')) {
                 if (preg_match('#/embed/([a-zA-Z0-9_\-]{11})#', $src, $v))
-                    return 'https://www.youtube.com/watch?v=' . $v[1];
+                    // *** CHANGED: save embed URL instead of watch URL ***
+                    return 'https://www.youtube.com/embed/' . $v[1];
                 continue;
             }
             $bad = false;
@@ -403,5 +408,3 @@ function titleFromSlug(string $url): string
     $slug = end(explode('/', trim(parse_url($url, PHP_URL_PATH), '/')));
     return ucwords(str_replace('-', ' ', preg_replace('/-?(live-)?webcam$|-live-cam$|-cam$/i', '', $slug)));
 }
-
-?>
