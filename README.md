@@ -2,7 +2,7 @@
 
 A PHP-based web scraper that:
 
-- Scrapes product/category data from websites
+- Scrapes the live videos from the website
 - Uses cURL for fetching pages
 - Supports parallel requests
 - Stores scraped data in MySQL
