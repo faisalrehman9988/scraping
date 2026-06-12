@@ -1,13 +1,15 @@
 # Web Scraper
 
-A PHP-based web scraper that:
-
-- Scrapes the live videos from the website
-- Uses cURL for fetching pages
-- Supports parallel requests
-- Stores scraped data in MySQL
-- Includes a frontend interface to start and stop scraping
-- Tracks scraping progress
+Web scraping using PHP and cURL
+Automatic category discovery and data extraction
+Data storage in MySQL database
+Progress tracking with real-time updates
+Stop/Resume scraping functionality
+REST API endpoints for accessing scraped data
+Token-based authentication for API requests
+API testing and verification using Postman
+JSON response format for easy integration with frontend applications
+User-friendly data presentation interface
 
 ## Technologies
 
