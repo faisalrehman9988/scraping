@@ -16,7 +16,7 @@ User-friendly data presentation interface
 - PHP
 - MySQL
 - cURL
-- HTML/CSS
+- HTML/CSS/bootstrap
 - JavaScript
 
 ## Installation
