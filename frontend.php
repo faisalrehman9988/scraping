@@ -23,6 +23,7 @@ function youtubeVideoId(?string $url): string
     }
 
     return end($segments) ?: '';
+   
 }
 
 if (isset($_GET['play_id'])) {

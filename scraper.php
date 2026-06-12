@@ -1,8 +1,66 @@
 <?php
 require_once 'db.php';
 
+
+header('Content-Type: application/json; charset=utf-8');
 set_time_limit(180);
 
+$pdo = getDBconnection();
+if (!$pdo) {
+    http_response_code(500);
+    echo json_encode(["status" => "error", "message" => "Database connection offline."]);
+    exit;
+}
+
+
+$activeToken = '';
+try {
+    // Look for the latest token that has not yet passed its expiration deadline
+    $tokenSql = "SELECT token_value FROM live_streams WHERE expire_at > NOW() ORDER BY id DESC LIMIT 1";
+    $tokenStmt = $pdo->query($tokenSql);
+    $cachedToken = $tokenStmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($cachedToken) {
+        $activeToken = $cachedToken['token_value'];
+    } else {
+     
+        $activeToken = bin2hex(random_bytes(16));
+       
+        $insertTokenSql = "INSERT INTO live_streams (token_value, expire_at) 
+                           VALUES (:token_value, DATE_ADD(NOW(), INTERVAL 1 DAY))";
+        $insertStmt = $pdo->prepare($insertTokenSql);
+        $insertStmt->execute([':token_value' => $activeToken]);
+    }
+} catch (PDOException $e) {
+    http_response_code(500);
+    echo json_encode(["status" => "error", "message" => "Security verification engine failure."]);
+    exit;
+}
+
+
+$requestHeaders = getallheaders();
+$receivedToken = '';
+
+
+if (isset($requestHeaders['Authorization'])) {
+    if (preg_match('/Bearer\s(\S+)/', $requestHeaders['Authorization'], $matches)) {
+        $receivedToken = $matches[1];
+    }
+} elseif (isset($requestHeaders['authorization'])) { 
+    if (preg_match('/Bearer\s(\S+)/', $requestHeaders['authorization'], $matches)) {
+        $receivedToken = $matches[1];
+    }
+}
+
+
+if (empty($receivedToken) || $receivedToken !== $activeToken) {
+    http_response_code(401); // 401 Unauthorized REST status code
+    echo json_encode([
+        "status" => "error",
+        "message" => "Access Denied: Missing or Expired Token in the HTTP Request Headers."
+    ]);
+    exit;
+}
 
 
 $stopFile = sys_get_temp_dir() . '/scraper_stop_' . session_id();
@@ -13,7 +71,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'stop') {
     echo json_encode(['stopped' => true]);
     exit;
 }
-
 
 if (isset($_GET['action']) && $_GET['action'] === 'progress') {
     session_start();
@@ -37,7 +94,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
     $bareHost   = preg_replace('/^www\./', '', $targetHost);
 
     if (!filter_var($targetUrl, FILTER_VALIDATE_URL)) {
-        header("Location: frontend.php?error=Invalid URL format.");
+        http_response_code(400); 
+        echo json_encode(["status" => "error", "message" => "Invalid target URL format."]);
         exit;
     }
 
@@ -48,20 +106,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
 
     if (count($segments) === 1 && reset($segments) !== 'category') {
         $camLinks[$targetUrl] = ['title' => titleFromSlug($targetUrl), 'country' => '', 'stream_url' => ''];
-
     } elseif (!empty($segments) && reset($segments) === 'category') {
         crawlCategoryFast($targetUrl, $bareHost, $camLinks, $limit, $stopFile, $progressFile);
-
     } else {
         $homeHtml = fetchOnePage($targetUrl);
         if (!$homeHtml) {
-            header("Location: frontend.php?error=Cannot fetch homepage.");
+            http_response_code(502); 
+            echo json_encode(["status" => "error", "message" => "Cannot fetch homepage data."]);
             exit;
         }
 
         $categoryUrls = discoverLeafCategories($homeHtml, $bareHost);
         if (empty($categoryUrls)) {
-            header("Location: frontend.php?error=No category links found.");
+            http_response_code(404); 
+            echo json_encode(["status" => "error", "message" => "No category links discovered on targets."]);
             exit;
         }
 
@@ -128,12 +186,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
 
     writeProgress($progressFile, ['found' => count($camLinks), 'saved' => 0, 'status' => 'Saving to database...']);
 
-    $pdo = getDBconnection();
-    if (!$pdo) {
-        header("Location: frontend.php?error=Database connection failed.");
-        exit;
-    }
-
     $allUrls      = array_keys($camLinks);
     $existingUrls = [];
     foreach (array_chunk($allUrls, 500) as $chunk) {
@@ -160,11 +212,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
         $pdo->commit();
     } catch (PDOException $e) {
         $pdo->rollBack();
-        header("Location: frontend.php?error=" . urlencode("DB Error: " . $e->getMessage()));
+        http_response_code(500);
+        echo json_encode(["status" => "error", "message" => "DB processing error encountered."]);
         exit;
     }
 
-    $stopped = shouldStop($stopFile) ? ' (stopped early)' : '';
     writeProgress($progressFile, [
         'found'  => count($camLinks),
         'saved'  => $savedCount,
@@ -173,13 +225,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['url'])) {
 
     @unlink($stopFile);
 
-    header("Location: frontend.php?success=" . urlencode("Done!$stopped $savedCount saved. $skippedCount skipped."));
+
+    $apiResponseData = [];
+    foreach ($camLinks as $pageUrl => $meta) {
+        $apiResponseData[] = [
+            "country"    => $meta['country'] ?: "Global",
+            "title"      => $meta['title']   ?: titleFromSlug($pageUrl),
+            "path_url"   => $pageUrl,
+            "stream_url" => $meta['stream_url'] ?? ''
+        ];
+    }
+
+    http_response_code(200); 
+    echo json_encode($apiResponseData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     exit;
 
 } else {
-    header("Location: frontend.php");
+    http_response_code(405); 
+    echo json_encode(["status" => "error", "message" => "Invalid HTTP Routing Verb. Use POST request operations only."]);
     exit;
 }
+
 
 
 function shouldStop(string $stopFile): bool {
@@ -369,7 +435,6 @@ function extractStreamUrl(string $html): string
             $iHost = parse_url($src, PHP_URL_HOST);
             if (str_contains($iHost, 'youtube') || str_contains($iHost, 'youtu.be')) {
                 if (preg_match('#/embed/([a-zA-Z0-9_\-]{11})#', $src, $v))
-                    // *** CHANGED: save embed URL instead of watch URL ***
                     return 'https://www.youtube.com/embed/' . $v[1];
                 continue;
             }
