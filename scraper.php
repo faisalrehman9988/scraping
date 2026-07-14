@@ -24,7 +24,7 @@ try {
         $activeToken = $cachedToken['token_value'];
     } else {
      
-        $activeToken = bin2hex(random_bytes(16));
+        $activeToken = bin2hex(random_bytes(20));
        
         $insertTokenSql = "INSERT INTO live_streams (token_value, expire_at) 
                            VALUES (:token_value, DATE_ADD(NOW(), INTERVAL 1 DAY))";
@@ -280,6 +280,7 @@ function fetchParallel(array $urls, int $batchSize = 15): array
             ]);
             curl_multi_add_handle($mh, $ch);
             $handles[(int)$ch] = ['handle' => $ch, 'url' => $url];
+          
         }
         $running = null;
         $start   = time();

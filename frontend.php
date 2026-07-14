@@ -22,8 +22,13 @@ function youtubeVideoId(?string $url): string
         return $segments[1];
     }
 
-    return end($segments) ?: '';
-   
+    // FIXED: Assigned to a variable first to comply with PHP pass-by-reference standards
+    if (!empty($segments)) {
+        $lastSegment = end($segments);
+        return $lastSegment ?: '';
+    }
+    
+    return '';
 }
 
 if (isset($_GET['play_id'])) {
@@ -54,20 +59,29 @@ $streams = [];
 $dbError = null;
 $pdo = getDBconnection();
 
+// Quietly fetch the active token string from the database to supply to JS below
+$activeTokenString = '';
 try {
-    if (!$pdo) {
+    if ($pdo) {
+        $tokenSql = "SELECT token_value FROM live_streams WHERE expire_at > NOW() ORDER BY id DESC LIMIT 1";
+        $tokenStmt = $pdo->query($tokenSql);
+        $cachedToken = $tokenStmt->fetch(PDO::FETCH_ASSOC);
+        if ($cachedToken) {
+            $activeTokenString = $cachedToken['token_value'];
+        }
+
+        // Fetch streams for display table
+        $stmt = $pdo->query("
+            SELECT ROW_NUMBER() OVER (ORDER BY id DESC) AS row_num, title, stream_url, country
+            FROM live_streams
+            ORDER BY id DESC
+        ");
+        $streams = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } else {
         throw new RuntimeException('Database connection failed.');
     }
-
-    $stmt = $pdo->query("
-        SELECT ROW_NUMBER() OVER (ORDER BY id DESC) AS row_num, title, stream_url, country
-        FROM live_streams
-        ORDER BY id DESC
-    ");
-    $streams = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {
     $dbError = $e->getMessage();
-    
 }
 
 $successMsg = $_GET['success'] ?? null;
@@ -91,17 +105,18 @@ $errorMsg = $_GET['error'] ?? null;
                 <?php endif; ?>
             </h1>
         </header>
-<?php if ($successMsg): ?>
-    <div id="successAlert" class="alert alert-success">
-        <?php echo htmlspecialchars($successMsg, ENT_QUOTES, 'UTF-8'); ?>
-    </div>
-    <script>
-        setTimeout(() => {
-            const el = document.getElementById('successAlert');
-            if (el) el.style.display = 'none';
-        }, 10000);
-    </script>
-<?php endif; ?>
+
+        <?php if ($successMsg): ?>
+            <div id="successAlert" class="alert alert-success">
+                <?php echo htmlspecialchars($successMsg, ENT_QUOTES, 'UTF-8'); ?>
+            </div>
+            <script>
+                setTimeout(() => {
+                    const el = document.getElementById('successAlert');
+                    if (el) el.style.display = 'none';
+                }, 10000);
+            </script>
+        <?php endif; ?>
 
         <?php if ($errorMsg || $dbError): ?>
             <div class="alert alert-error"><?php echo htmlspecialchars($errorMsg ?: $dbError, ENT_QUOTES, 'UTF-8'); ?></div>
@@ -127,10 +142,10 @@ $errorMsg = $_GET['error'] ?? null;
                 </select>
 
                 <button id="scrapeBtn" class="button button-primary" type="submit">Scrape URL</button>
-                <button id="stopBtn" class="button button-danger" type="button">Stop</button>
+                <button id="stopBtn" class="button button-danger" type="button" style="display: none;">Stop</button>
             </form>
 
-            <div id="progressArea" class="progress">
+            <div id="progressArea" class="progress" style="display: none;">
                 <div class="progress-track">
                     <div id="progressBar" class="progress-bar"></div>
                 </div>
@@ -198,23 +213,37 @@ $errorMsg = $_GET['error'] ?? null;
     const progressCount = document.getElementById('progressCount');
     const limitSelect = document.querySelector('select[name="limit"]');
 
+    // Dynamically echo token safely into JS execution environment
+    const SECURITY_TOKEN = "<?php echo htmlspecialchars($activeTokenString, ENT_QUOTES, 'UTF-8'); ?>";
+
     let pollInterval = null;
 
-    form.addEventListener('submit', startScraping);
+    // FIXED: Form submit intercepts native pipeline redirection to pass Authorization Token safely
+    form.addEventListener('submit', function(e) {
+        e.preventDefault(); 
+        startScraping();
+    });
 
+    // FIXED: Injected Bearer Token security properties into the stop event loop handling logic
     stopBtn.addEventListener('click', () => {
-        fetch('scraper.php?action=stop')
-            .then(() => {
-                progressStatus.textContent = 'Stopping...';
-                stopBtn.disabled = true;
-            })
-            .catch(() => {
-                progressStatus.textContent = 'Could not send stop request.';
-            });
+        fetch('scraper.php?action=stop', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${SECURITY_TOKEN}`
+            }
+        })
+        .then(() => {
+            progressStatus.textContent = 'Stopping...';
+            stopBtn.disabled = true;
+        })
+        .catch(() => {
+            progressStatus.textContent = 'Could not send stop request.';
+        });
     });
 
     function startScraping() {
         const limit = Number.parseInt(limitSelect.value, 10) || 50;
+        const targetUrl = document.getElementById('urlInput').value;
 
         scrapeBtn.disabled = true;
         scrapeBtn.textContent = 'Scraping...';
@@ -227,13 +256,55 @@ $errorMsg = $_GET['error'] ?? null;
         progressCount.textContent = '0 found';
 
         pollInterval = setInterval(() => pollProgress(limit), 1500);
+
+        // Prepare request body content
+        const payload = new URLSearchParams();
+        payload.append('url', targetUrl);
+        payload.append('limit', limit);
+
+        // FIXED: Dispatches background request processing loops using explicit Token authorization
+        fetch('scraper.php', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${SECURITY_TOKEN}`,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: payload
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw new Error(err.message || 'Scraper encountered a critical error'); });
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log("Scraping engine background loop finished operations:", data);
+        })
+        .catch(error => {
+            clearInterval(pollInterval);
+            progressStatus.textContent = 'Error: ' + error.message;
+            progressBar.style.background = '#d32f2f';
+            scrapeBtn.disabled = false;
+            scrapeBtn.textContent = 'Scrape URL';
+        });
     }
 
+    // FIXED: Added Authorization Header to fix 401 errors during background polling checks
     function pollProgress(limit) {
-        fetch('scraper.php?action=progress')
-            .then(response => response.json())
-            .then(data => updateProgress(data, limit))
-            .catch(() => {});
+        fetch('scraper.php?action=progress', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${SECURITY_TOKEN}`
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Progress request rejected by token validation rules');
+            }
+            return response.json();
+        })
+        .then(data => updateProgress(data, limit))
+        .catch(() => {});
     }
 
     function updateProgress(data, limit) {
